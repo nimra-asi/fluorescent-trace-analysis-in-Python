@@ -1,0 +1,8 @@
+# function that creates a list of rois with no exocytosis events
+def get_silent_rois(df, active_rois, my_path, video_name):
+    all_rois = set(df.columns)
+    active_set = set(["ROI%03d" % i for i in active_rois])
+
+    silent_rois = [k for k in all_rois if k not in active_set]
+
+    return silent_rois
