@@ -1,0 +1,20 @@
+# function that reads and processes data from a csv file
+# takes as input a csv file (video_name) and its location (my_path)
+# performs the following:
+# 1) separates roi traces from bg, avg, err
+# 2) subtracts bg from every roi trace
+# 3) outputs these ready to use traces as a Pandas dataframe
+# 4) calculates and stores the baseline and std deviation for each roi (for every video being analyzed)
+# running find peaks inside this now
+def get_rois(video_name, my_path):
+    file_loc = str(my_path + "/" + video_name + ".csv")
+    raw_data = pd.read_csv(file_loc)
+
+    rois = raw_data.iloc[:, :-3]
+    bg = raw_data.iloc[:, len(raw_data.columns) - 3]
+
+    df = rois.sub(bg, axis='rows')
+    baselines = df.iloc[0:5, :].mean(axis=0, skipna='True', numeric_only='True')
+    df_std = df.iloc[0:5, :].std(axis=0, skipna='True', numeric_only='True')
+
+    return df, baselines, df_std
