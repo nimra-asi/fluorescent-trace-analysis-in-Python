@@ -1,0 +1,48 @@
+ this takes as input a file location (where the testing data should be stored)
+# a list of the fits files in that location and the list of active rois that were decided upon
+# by the code threshold. It compares the rois said to contain "peaks" by the code to the list
+# provided and then scores the code as having found either a "correct" judgement, "false positives"
+# or "false negatives" as a % of the total number of rois being considered. These three categories are output
+# as a list
+def test_threshold(my_path, my_videos, active_rois):
+    false_pos = 0
+    false_neg = 0
+    correct = 0
+    total_rois = 0
+
+    for video in my_videos:
+        file_loc = str(my_path + "/" + video + "_test.csv")
+        user_defined_peaks = pd.read_csv(file_loc)
+        user_defined_peaks = user_defined_peaks.values.flatten().tolist()
+
+        # creating a comparison list
+        for_testing = np.zeros((1, len(user_defined_peaks)), dtype='int').flatten().tolist()
+
+        for i in range(len(for_testing)):
+
+            if i in active_rois:
+                for_testing[i] = 1
+
+            code_defined_peaks = for_testing
+
+        # actual testing of threshold
+        for x in range(len(user_defined_peaks)):
+
+            if code_defined_peaks[x] == user_defined_peaks[x]:
+                correct += 1
+
+            elif code_defined_peaks[x] > user_defined_peaks[x]:
+                false_pos += 1
+
+            elif code_defined_peaks[x] < user_defined_peaks[x]:
+                false_neg += 1
+
+        total_rois += len(user_defined_peaks)
+
+        # getting as a percentage of total rois (for all videos combined
+        # for a particular threshold
+        correct = correct / total_rois * 100
+        false_pos = false_pos / total_rois * 100
+        false_neg = false_neg / total_rois * 100
+
+        return [correct, false_pos, false_neg]
