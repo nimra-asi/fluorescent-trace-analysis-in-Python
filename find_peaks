@@ -1,0 +1,65 @@
+# function that takes as input a set of x locations (frames above_threshold) for each roi and outputs the range of
+# consecutive values in that list
+def get_consecutive_values(above_threshold):
+    nums = sorted(set(above_threshold))
+    gaps = [[i, j] for i, j in zip(nums, nums[1:]) if i + 1 < j]
+    edges = iter(nums[:1] + sum(gaps, []) + nums[-1:])
+    my_edges = list(zip(edges, edges))
+
+    return my_edges
+
+# function that takes as input a list of edges and filters them based
+# on a width criteria (i.e. trace fluorescence must stay above threshold for so many time points)
+# keeping the ones that pass the width condition (saved as peak_locs)
+# also takes as input "curr_ind" which is the column number of the roi currently being analyzed
+def implement_width_condition(my_edges, curr_index, width_factor):
+    peak_locs = []
+    # list containing the column numbers of "active rois" ie rois with a spontaneous event
+    to_keep = []
+
+    for value in my_edges:
+
+        if value[1] - value[0] >= width_factor:
+            peak_locs.append(value)
+            # if any set of edges passes the threshold add to active list
+            to_keep.append(curr_index)
+
+    return peak_locs, to_keep
+
+# function that takes as input a list of bg subtracted peaks, the original dataframe of bg subtracted
+# rois, the baseline and std deviation for each roi trace. Input also includes the characteristics of the
+# threshold to be used (std_factor, width_factor)
+# outputs a list of rois with events as well as the location (in frame number of such events or peaks)
+# calls the following functions - get_consecutive_values; implement width_condition
+def find_peaks(df, baselines, df_std, std_factor, width_factor):
+    my_columns = df.columns
+
+    # these variables keep track of active and silent rois
+    curr_index = 0
+    active_rois = []
+
+    # iterating through the columns, keeping track with curr_index
+    for x in my_columns:
+        roi = df[x]
+        threshold = baselines[x] + std_factor * df_std[x]
+        above_threshold = []
+
+        counter = 0
+        for val in roi:
+
+            if val - baselines[x] > threshold:
+                above_threshold.append(counter)
+
+            counter += 1
+
+        my_edges = get_consecutive_values(above_threshold)
+        peak_locs, to_keep = implement_width_condition(my_edges, curr_index, width_factor)
+
+        # collecting a list of rois with at least one peak
+        if len(to_keep) != 0:
+            active_rois.append(to_keep[0])
+
+        # iterating the index after every column
+        curr_index += 1
+
+    return active_rois, peak_locs
