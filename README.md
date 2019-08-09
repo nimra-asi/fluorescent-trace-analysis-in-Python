@@ -9,3 +9,6 @@ The traces (stored in csv files) are read into Python. The following processing 
    of data)  
 4) once a threshold has been picked the events for different conditions can be averaged and graphed
 5) the sorted traces can be written to Excel
+
+Because this is a collection of functions that together complete the goal task I've created a mock "run_client" file that
+demonstrates the order that the functions should be run as well as the Python libraries used 
