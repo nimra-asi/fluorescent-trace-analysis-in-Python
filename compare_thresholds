@@ -1,0 +1,35 @@
+# takes as input a list of tuples that contains the thresholds to be compared (asks user)
+# uses predefined function find_peaks
+# (1st value of tuple = number that std should be multiplied by. 2nd value of tuple = width of "peaks)
+# along with list of videos, original rois in dataframe, and location of files
+# finds the active rois for each video using those thresholds. Tests the performance of each
+# threshold against the user input categorization and plots a set of graphs comparing the
+# performance of each threshold for the dataset
+def compare_thresholds(my_path, my_videos, df, potential_thresholds, baselines, df_std):
+    #potential_thresholds = input("input list of threshold tuple(s) please ")
+    for_plotting = []
+
+    for x in range(len(potential_thresholds)):
+        std_factor = potential_thresholds[x][0]
+        width_factor = potential_thresholds[x][1]
+
+        active_rois, peak_locs = find_peaks(df, baselines, df_std, std_factor, width_factor)
+
+        performance_list = test_threshold(my_path, my_videos, active_rois)
+        for_plotting.append(performance_list)
+
+    names = ["correct", "false \npositives", "false \n negatives"]
+    print(for_plotting)
+
+    for x in range(len(for_plotting)):
+        values = for_plotting[x]
+        plt.subplot(1, len(for_plotting) + 1, x + 1)
+        plt.bar(names, values, color=np.random.rand(3, ))
+
+        my_label = "peak value > baseline + %.1f * std \n width >= %.1f" % (potential_thresholds[x])
+        plt.title(my_label)
+        plt.ylabel('Performance (% of total ROIs)')
+
+    plt.tight_layout()
+    plt.suptitle('Comparison of thresholds \n finding ROIs with spontaneous events ')
+    plt.show()
