@@ -1,11 +1,11 @@
 # takes as input a list of tuples that contains the thresholds to be compared (asks user)
-# uses predefined function find_peaks
+# uses predefined functions find_peaks and test_threshold
 # (1st value of tuple = number that std should be multiplied by. 2nd value of tuple = width of "peaks)
 # along with list of videos, original rois in dataframe, and location of files
 # finds the active rois for each video using those thresholds. Tests the performance of each
 # threshold against the user input categorization and plots a set of graphs comparing the
 # performance of each threshold for the dataset
-def compare_thresholds(my_path, my_videos, df, potential_thresholds, baselines, df_std):
+def threshold_comparison(my_path, my_videos, df, potential_thresholds, baselines, df_std):
     #potential_thresholds = input("input list of threshold tuple(s) please ")
     for_plotting = []
 
