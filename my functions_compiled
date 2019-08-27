@@ -1,0 +1,370 @@
+import subprocess
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+import statistics
+import csv
+
+
+# first ask the user for the location of the files
+# so that goes into the global memory
+#my_path = input('Path to folder containing data to be analyzed?')
+
+#function that outputs a list "my_videos" which is a list of all the video files in .fits format
+def get_video_names(my_path):
+    my_files = os.listdir(my_path)
+    my_videos = []
+    my_exts = []
+
+    for file_name in my_files:
+
+        if file_name[-5:] == ".fits":
+            my_videos.append(file_name[:-5])
+            my_exts.append(".fits")
+
+        elif file_name[-4:] == ".tif":
+            my_videos.append(file_name[:-4])
+            my_exts.append(".tif")
+
+    return my_videos, my_exts
+
+# function that writes a custom Fiji script to analyze our videos using a Fiji plugin - TimeSeriesAnalyzer
+# takes as input a list of video names and the location of the files. Matches each video to its appropriate ROI set
+def create_Fiji_script(my_videos, my_path, my_exts):
+    file = open(my_path + "/my_script.txt", 'w')
+
+    # opening time series analyzer plugin once
+    file.write('run("Time Series Analyzer V3");')
+
+    counter = 0
+    for item in my_videos:
+        # getting my video and roi extensions
+        video_name = item + my_exts[counter]
+        rois = 'RoiSet' + item + '.zip'
+        counter += 1
+
+        # opening my video
+        file.write('\nopen("' + my_path + '/' + video_name + '");')
+        file.write('\nselectWindow("' + video_name + '");')
+
+        # opening the RoiSet for that video
+        file.write('\nroiManager("Open", "' + my_path + '/' + rois + '");')
+
+        # running time trace average from my plugins
+        file.write('\nrun("IJ Robot", "order=Left_Click x_point=171 y_point=117 delay=300")')
+
+        # saving time trace averages
+        file.write('\nselectWindow("Time Trace(s)");')
+        file.write('\nsaveAs("Results", "' + my_path + '/' + item + '.csv");')
+
+        # writing custom script to file
+        file.write('\nroiManager("Delete");')
+
+    #closing all open windows after getting data
+    file.write('\nrun("Close All");')
+
+    file.close()
+
+# function that opens an instance of Fiji to run our custom script
+# takes as input the location of our script "my_path"
+def run_my_script(my_path):
+    loc = input('Where is Fiji?')
+    subprocess.Popen(loc)
+
+# function that takes as input a data frame of bg subtracted rois (and name of the current csv file) and
+# finds the mean value for every minute (assuming 2 Hz frame rate). Also writes all these values to an
+# excal file annotated
+def get_minute_means(df, name, my_path):
+    avg = df.mean(axis=1, skipna="True")
+    minute_means = []
+
+    frame_rate = 2
+    step_size = 60 * frame_rate
+
+    leftover_frames = len(avg) % step_size
+    num_mins = (len(avg) - leftover_frames) / step_size
+
+    x = 0
+    start_frame = 0
+    while x < num_mins:
+        minute_means.append((avg[start_frame: start_frame + step_size]).mean())
+        start_frame += step_size
+        x += 1
+
+    if leftover_frames > 0:
+        minute_means.append(avg[-leftover_frames: len(avg) + 1].mean())
+
+    # writing my min averages and file name to a csv file
+    file_loc = str(my_path + "/average_fl.csv")
+    with open(file_loc, 'a', newline='') as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow([name, num_mins, leftover_frames])
+
+        counter = 0
+        for x in minute_means:
+            writer.writerow([x])
+
+    return avg, minute_means
+
+# function that reads and processes data in the excel files output from "my_script"
+# performs the following:
+# 1) separates roi traces from bg, avg, err
+# 2) subtracts bg from every roi trace
+# 3) outputs these ready to use traces as a Pandas dataframe
+# 4) calculates and stores the baseline and std deviation for each roi (for every video being analyzed)
+# running find peaks inside this now
+def get_rois(video_name, my_path):
+    file_loc = str(my_path + "/" + video_name + ".csv")
+    raw_data = pd.read_csv(file_loc)
+
+    rois = raw_data.iloc[:, :-3] # getting all columns except the last three
+    bg = raw_data.iloc[:, len(raw_data.columns) - 3]
+
+    df = rois.sub(bg, axis='rows') # subtracting the bg from each column
+    baselines = df.iloc[0:10, :].mean(axis=0, skipna='True', numeric_only='True')
+    df_std = df.iloc[0:10, :].std(axis=0, skipna='True', numeric_only='True')
+
+    return df, baselines, df_std
+
+
+# function that takes as input a set of x locations (frames above_threshold) for each roi and outputs the range of
+# consecutive values in that list
+def get_consecutive_values(above_threshold):
+    nums = sorted(set(above_threshold))
+    gaps = [[i, j] for i, j in zip(nums, nums[1:]) if i + 1 < j]
+    edges = iter(nums[:1] + sum(gaps, []) + nums[-1:])
+    my_edges = list(zip(edges, edges))
+
+    return my_edges
+
+# function that takes as input a list of edges and filters them based
+# on a width criteria (i.e. trace fluorescence must stay above threshold for so many time points)
+# keeping the ones that pass the width condition (saved as peak_locs)
+# also takes as input "curr_ind" which is the column number of the roi currently being analyzed
+def implement_width_condition(my_edges, curr_index, width_factor):
+    peak_locs = []
+    # list containing the column numbers of "active rois" ie rois with a spontaneous event
+    to_keep = []
+
+    for value in my_edges:
+
+        if value[1] - value[0] >= width_factor:
+            peak_locs.append(value)
+            # if any set of edges passes the threshold add to active list
+            to_keep.append(curr_index)
+
+    return peak_locs, to_keep
+
+# function that takes as input a list of bg subtracted peaks, the original dataframe of bg subtracted
+# rois, the baseline and std deviation for each roi trace. Input also includes the characteristics of the
+# threshold to be used (std_factor, width_factor)
+# outputs a list of rois with events as well as the location (in frame number of such events or peaks)
+# calls the following functions - get_consecutive_values; implement width_condition
+def find_peaks(df, baselines, df_std, std_factor, width_factor):
+    my_columns = df.columns
+
+    # these variables keep track of active and silent rois
+    curr_index = 0
+    active_rois = []
+
+    # iterating through the columns, keeping track with curr_index
+    for x in my_columns:
+        roi = df[x]
+        threshold = baselines[x] + std_factor * df_std[x]
+        above_threshold = []
+
+        counter = 0
+        for val in roi:
+
+            if val - baselines[x] > threshold:
+                above_threshold.append(counter)
+
+            counter += 1
+
+        my_edges = get_consecutive_values(above_threshold)
+        peak_locs, to_keep = implement_width_condition(my_edges, curr_index, width_factor)
+
+        # collecting a list of rois with at least one peak
+        if len(to_keep) != 0:
+            active_rois.append(to_keep[0])
+
+        # iterating the index after every column
+        curr_index += 1
+
+    return active_rois, peak_locs
+
+# function that creates a list of rois with no exocytosis events
+def get_silent_rois(df, active_rois):
+    all_rois = set(df.columns)
+    active_set = set(["ROI%03d" % i for i in active_rois])
+
+    silent_rois = [k for k in all_rois if k not in active_set]
+
+    return silent_rois
+
+# this takes as input a file location (where the testing data should be stored)
+# a list of the fits files in that location and the list of active rois that were decided upon
+# by the code threshold. It compares the rois said to contain "peaks" by the code to the list
+# provided and then scores the code as having found either a "correct" judgement, "false positives"
+# or "false negatives" as a % of the total number of rois being considered. These three categories are output
+# as a list
+def test_threshold(my_path, my_videos, active_rois):
+    false_pos = 0
+    false_neg = 0
+    correct = 0
+    total_rois = 0
+
+    for video in my_videos:
+        file_loc = str(my_path + "/" + video + "_test.csv")
+        user_defined_peaks = pd.read_csv(file_loc)
+        user_defined_peaks = user_defined_peaks.values.flatten().tolist()
+
+        # creating a comparison list
+        for_testing = np.zeros((1, len(user_defined_peaks)), dtype='int').flatten().tolist()
+
+        for i in range(len(for_testing)):
+
+            if i in active_rois:
+                for_testing[i] = 1
+
+            code_defined_peaks = for_testing
+
+        # actual testing of threshold
+        for x in range(len(user_defined_peaks)):
+
+            if code_defined_peaks[x] == user_defined_peaks[x]:
+                correct += 1
+
+            elif code_defined_peaks[x] > user_defined_peaks[x]:
+                false_pos += 1
+
+            elif code_defined_peaks[x] < user_defined_peaks[x]:
+                false_neg += 1
+
+        total_rois += len(user_defined_peaks)
+
+        # getting as a percentage of total rois (for all videos combined
+        # for a particular threshold
+        correct = correct / total_rois * 100
+        false_pos = false_pos / total_rois * 100
+        false_neg = false_neg / total_rois * 100
+
+        return [correct, false_pos, false_neg]
+
+# takes as input a list of tuples that contains the thresholds to be compared (asks user)
+# (1st value of tuple = std multiplication factor. 2nd value of tuple = width condition)
+# along with list of videos, original rois in dataframe, and location of files
+# finds the active rois for each video using those thresholds. Tests the performance of each
+# threshold against the user input categorization and plots a set of graphs comparing the
+# performance of each threshold for the dataset
+def compare_thresholds(my_path, my_videos, df, potential_thresholds, baselines, df_std):
+    #potential_thresholds = input("input list of threshold tuple(s) please ")
+    for_plotting = []
+
+    for x in range(len(potential_thresholds)):
+        std_factor = potential_thresholds[x][0]
+        width_factor = potential_thresholds[x][1]
+
+        active_rois, peak_locs = find_peaks(df, baselines, df_std, std_factor, width_factor)
+
+        performance_list = test_threshold(my_path, my_videos, active_rois)
+        for_plotting.append(performance_list)
+
+    names = ["correct", "false \npositives", "false \n negatives"]
+    print(for_plotting)
+
+    for x in range(len(for_plotting)):
+        values = for_plotting[x]
+        plt.subplot(1, len(for_plotting) + 1, x + 1)
+        plt.bar(names, values, color=np.random.rand(3, ))
+
+        my_label = "peak value > baseline + %.1f * std \n width >= %.1f" % (potential_thresholds[x])
+        plt.title(my_label)
+        plt.ylabel('Performance (% of total ROIs)')
+
+    plt.tight_layout()
+    plt.suptitle('Comparison of thresholds \n finding ROIs with spontaneous events ')
+    plt.show()
+
+
+# function that takes as input a list of roi numbers and outputs it to an excel
+# sheet containing the bg subtracted rois for each condition - for active rois
+def output_active_rois(df, active_rois, my_path, video_name):
+    df_active_rois = pd.DataFrame()
+
+    for roi_num in active_rois:
+        index_name = "ROI%03d" % roi_num
+        df_active_rois[index_name] = df[index_name]
+
+    file_loc = str(my_path + "/" + video_name + "_active.xlsx")
+    with pd.ExcelWriter(file_loc) as writer:
+        name = video_name
+        df_active_rois.to_excel(writer, sheet_name=name)
+
+    writer.save()
+
+
+# function that takes as input a list of roi numbers and outputs it to an excel
+# sheet containing the bg subtracted rois for each condition - for silent rois
+def output_silent_rois(df, silent_rois, my_path, video_name):
+    df_silent_rois = pd.DataFrame()
+
+    for roi in silent_rois:
+        df_silent_rois[roi] = df[roi]
+
+    file_loc = str(my_path + "/" + video_name + "_silent.xlsx")
+    writer = pd.ExcelWriter(file_loc)
+
+    name = video_name
+    df_silent_rois.to_excel(writer, sheet_name=name)
+
+    writer.save()
+
+    return df_silent_rois
+
+def master_function_to_run(my_path, my_videos, potential_thresholds):
+    #my_videos, my_exts = get_video_names(my_path)
+    std_factor = 3
+    width_factor = 2.5
+
+
+    for video_name in my_videos:
+        df, baselines, df_std = get_rois(video_name, my_path)
+        active_rois, peaks_locs = find_peaks(df, baselines, df_std, std_factor, width_factor)
+        silent_rois = get_silent_rois(df, active_rois, my_path, video_name)
+
+        #output_active_rois(df, active_rois, my_path, video_name)
+        #output_silent_rois(df, silent_rois, my_path, video_name)
+
+    #compare_thresholds(my_path, my_videos, df, potential_thresholds, baselines, df_std)
+
+# function that reads and processes data in the excel files output from "my_script"
+# performs the following:
+# 1) separates roi traces from bg, avg, err
+# 2) calculates avg (w/o bg) + sem
+# 3) subtracts bg from every roi trace
+# 4) outputs these ready to use traces as a Pandas dataframe
+# 5) writes all names traces to excel sheet
+def compile_traces(my_videos, my_path):
+    traces = pd.DataFrame()
+
+    for video_name in my_videos:
+        file_loc = str(my_path + "/" + video_name + ".csv")
+        raw_data = pd.read_csv(file_loc)
+
+        rois = raw_data.iloc[:, :-3]
+        bg = raw_data.iloc[:, len(raw_data.columns) - 3]
+
+        df = rois.sub(bg, axis='rows')
+        avg = df.mean(axis=1, skipna='True')
+        sem = df.sem(axis=1, skipna='True')
+
+        traces[video_name] = avg
+        traces[str('sem_' + video_name)] = sem
+
+    traces.to_excel(str(my_path + '/avg_traces.xlsx'), index='None', header='True')
+
+    return df
+
