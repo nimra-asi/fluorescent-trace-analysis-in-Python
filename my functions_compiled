@@ -166,7 +166,7 @@ def find_peaks(df, baselines, df_std, std_factor, width_factor):
     my_columns = df.columns
 
     # these variables keep track of active and silent rois
-    curr_index = 0
+    curr_index = 0  #start curr_index from 1 bc the rois are numbered from 1
     active_rois = []
 
     # iterating through the columns, keeping track with curr_index
@@ -175,8 +175,8 @@ def find_peaks(df, baselines, df_std, std_factor, width_factor):
         threshold = baselines[x] + std_factor * df_std[x]
         above_threshold = []
 
-        counter = 0
-        for val in roi:
+        counter = 0 #saving the frame number where we were above threshold ton check width condition next
+        for val in roi: #this is iterating over every frame in that particular roi
 
             if val - baselines[x] > threshold:
                 above_threshold.append(counter)
@@ -188,9 +188,9 @@ def find_peaks(df, baselines, df_std, std_factor, width_factor):
 
         # collecting a list of rois with at least one peak
         if len(to_keep) != 0:
-            active_rois.append(to_keep[0])
+            active_rois.append(to_keep[0] + 1)
 
-        # iterating the index after every column
+    # iterating the index after every column
         curr_index += 1
 
     return active_rois, peak_locs
@@ -202,7 +202,7 @@ def get_silent_rois(df, active_rois):
 
     silent_rois = [k for k in all_rois if k not in active_set]
 
-    return silent_rois
+    return silent_rois, active_set
 
 # this takes as input a file location (where the testing data should be stored)
 # a list of the fits files in that location and the list of active rois that were decided upon
@@ -296,9 +296,17 @@ def output_active_rois(df, active_rois, my_path, video_name):
 
     for roi_num in active_rois:
         index_name = "ROI%03d" % roi_num
+
+        if roi_num == 100:  # patch because 100 has been saved as 0100 in all the csv files
+            index_name = 'ROI0100'
+
+        if roi_num >= len(df.columns):  # -1 is necessary bc df includes the bg column
+            index_name = 'ROI' + str(len(df.columns) - 1)
+
         df_active_rois[index_name] = df[index_name]
 
     file_loc = str(my_path + "/" + video_name + "_active.xlsx")
+
     with pd.ExcelWriter(file_loc) as writer:
         name = video_name
         df_active_rois.to_excel(writer, sheet_name=name)
