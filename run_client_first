@@ -1,0 +1,18 @@
+from my_functions_2 import *
+import subprocess
+import sys
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+import csv
+
+my_path = input('Path to folder containing data to be analyzed?')
+my_videos, my_exts = get_video_names(my_path)
+create_Fiji_script(my_videos, my_path, my_exts)
+
+# RUN ONCE HAVE CSV FILES
+#compile_traces(my_videos, my_path)
+
+
