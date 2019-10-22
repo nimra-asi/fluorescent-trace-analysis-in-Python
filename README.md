@@ -12,3 +12,5 @@ The traces (stored in csv files) are read into Python. The following processing 
 
 Because this is a collection of functions that together complete the goal task I've created a mock "run_client" file that
 demonstrates the order that the functions should be run as well as the Python libraries used 
+
+Blog post on this code (with examples) linked here: https://nimasiworks.wordpress.com/whats-in-a-threshold/
